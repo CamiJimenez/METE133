@@ -1,0 +1,448 @@
+#Indice de Moran
+#install.packages('spDataLarge')
+#Cargamos librerías
+library(sf)
+library(dplyr)
+library(spdep)
+library(gstat)
+library(spData)
+library(tidyr)
+library(tmap)
+
+#cargar Area de estudio
+lim <- readRDS('Data/Data_processed/area_estudio.rds')
+#Cargar datos de estaciones
+pre_may <- readRDS('Data/Data_processed/data_prec_mayo.rds')
+pre_jun <- readRDS('Data/Data_processed/data_prec_junio.rds')
+pre_jul <- readRDS('Data/Data_processed/data_prec_julio.rds')
+
+
+#Elimininamos NA
+pre_may <- pre_may |>
+  st_as_sf() |>
+  st_coordinates() |>
+  bind_cols(pre_may) |>
+  tidyr::drop_na()
+
+pre_jun <- pre_jun |>
+  st_as_sf() |>
+  st_coordinates() |>
+  bind_cols(pre_jun) |>
+  tidyr::drop_na()
+
+pre_jul <- pre_jul |>
+  st_as_sf() |>
+  st_coordinates() |>
+  bind_cols(pre_jul) |>
+  tidyr::drop_na()
+
+
+pre_may <- st_as_sf(pre_may,coords=c('X','Y'))
+pre_jun <- st_as_sf(pre_jun,coords=c('X','Y'))
+pre_jul <- st_as_sf(pre_jul,coords=c('X','Y'))
+
+#Calculamos matriz de distancia entre todos los puntos
+dist_may <- st_distance(pre_may)
+dist_jun <- st_distance(pre_jun)
+dist_jul <- st_distance(pre_jul)
+
+#pesos
+w_may <- 1/dist_may
+w_jun <- 1/dist_jun
+w_jul <- 1/dist_jul
+
+#Diagonales de distancia y matriz de pesos
+diag(w_may) <- 0
+w_may <- mat2listw(as.matrix(w_may)) #matriz de pesos
+diag(w_jun) <- 0
+w_jun <- mat2listw(as.matrix(w_jun))
+diag(w_jul) <- 0
+w_jul <- mat2listw(as.matrix(w_jul))
+
+# 1.Indice de moran Global: Autocorrelación general de todos los datos ####
+im_may <- moran(pre_may$pre_mayo,w_may,n=length(w_may$neighbours),S0=Szero(w_may))
+im_jun <- moran(pre_jun$pre_junio,w_jun,n=length(w_jun$neighbours),S0=Szero(w_jun))
+im_jul <- moran(pre_jul$pre_julio,w_jul,n=length(w_jul$neighbours),S0=Szero(w_jul))
+
+c(im_may[1],im_jun[1],im_jul[1])
+
+#Este indice permite ver el nivel de autocorrelacion espacial: similitud o diferencia entre observaciones. Los resultados se interpretan como
+#Valores IM < E(I) indican autocorrelacion espacial negativa
+#Valores IM > E(I) indican autocorrelacion espacial positiva
+#IM Mayo: 0.28
+#IM Junio: -0.06
+#IM Julio: 0.06
+
+
+#prueba de montecarlos para ver nivel de significancia del indicador, autocorrelacion global
+moran.mc(pre_may$pre_mayo,w_may,nsim=1000)  #indica autocorrelacion espacial, las muestras mas cercanas son mas parecidas
+moran.mc(pre_jun$pre_junio,w_jun,nsim=1000) #valor p-value > 0.05 no es significativa la autocorrelacion espacial
+moran.mc(pre_jul$pre_julio,w_jul,nsim=1000) ##valor p-value > 0.05 no es significativa la autocorrelacion espacial
+
+#Hipotesis nula: no hay autocorrelacion espacial
+#Moran.MC Mayo: P-value < 0.005, se rechaza hipotesis nula, hay autocorrelacion espacial
+#Moran.MC Junio: valor p-value > 0.05 no es significativa la autocorrelacion espacial
+#Moran.MC Julio:  valor p-value > 0.05 no es significativa la autocorrelacion espacial
+
+
+#Graficos
+moran.plot(pre_may$pre_mayo,w_may)
+#pendiente positiva: autocorrelacion espacial positiva, valores mas bajos de precipitacion estan asociados a valores mas bajos de precipitacion con sus vecinos
+moran.plot(pre_jun$pre_junio,w_jun)
+#pendiente negativa: autocorrelacion espacial negativa
+moran.plot(pre_jul$pre_julio,w_jul)
+#pendiente negativa: autocorrelacion espacial negativa
+
+
+# 2.Indice de Moran Local: Calcula el índice para cada observación  ####
+
+lm_may <- localmoran(pre_may$pre_mayo,w_may)
+lm_jun <- localmoran(pre_jun$pre_junio,w_jun)
+lm_jul <- localmoran(pre_jul$pre_julio,w_jul)
+
+
+# Cuadrantes de moran local seleccion de valores significativos
+# Mayo
+quad_may <- attr(lm_may,'quadr')['mean']
+pmen5 <- which(lm_may[,5] < 0.05)
+pre_may$quadr <- NA
+pre_may[pmen5,]$quadr <- quad_may[pmen5,]
+pre_may
+
+
+# Junio
+quad_jun <- attr(lm_jun,'quadr')['mean']
+pmen5_jun <- which(lm_jun[,5] < 0.05)
+pre_jun$quadr <- NA
+pre_jun[pmen5_jun,]$quadr <- quad_jun[pmen5_jun,]
+
+#Prueba eliminando dato estacion 138
+pre_prueba <- pre_jun[-2,]
+pre_prueba
+tmap_mode('view')
+tm_shape(pre_prueba) + tm_dots(size=.1,col='quadr') 
+##La estacion 138 tiene valores de precipitacion de 2.5 (mm) por lo que se estima pueda corresponder a un dato outliers que podria afectar la significancia del resto de los datos. Al realizar la prueba eliminando esa fila, los datos continuan siendo no significantes. 
+
+
+# Julio
+quad_jul <- attr(lm_jul,'quadr')['mean']
+pmen5_jul <- which(lm_jul[,5] < 0.05)
+pre_jul$quadr <- NA
+pre_jul[pmen5_jul,]$quadr <- quad_jul[pmen5_jul,]
+#No hay significancia entre los puntos, todos ellos corresponden a perdidos. Durante ese fecha ocurrio un evento de precipitacion extremo que podria ser causa de la gran variabilidad de los datos y que por ello posiblemente el modelo se vea asi.
+
+#visualización Moran Local
+library(tmap)
+tmap_mode('view')
+tm_shape(pre_may) + tm_dots(size=.1,col='quadr') 
+# valores en rojo tienen altos valores de precipitacion asi como tambien sus vecinos, en el norte hay bajos valores de precipitacion asociados a bajos valores de precipitacion en sus vecinos, los valores morados tienen bajo valor de precipitacion pero en sus vecinos alto valor de precipitacion y en los amarillos tienen altos valores de precipitacion con vecinos de valo valor de precipitacion.
+
+pre_may
+tm_shape(pre_jun) + tm_dots(size=.1,col='quadr')
+#Todos los puntos se clasificaron como no significativos, los valores altos no se juntan con los vecinos
+pre_jun
+tm_shape(pre_jul) + tm_dots(size=.1,col='quadr')
+#Todos los puntos se clasificaron como no significativos, los valores altos no se juntan con los vecinos
+pre_jul
+
+#Respecto a lo que se observa para el punto 1, solamente para mayo hubo correlacion especial significativa con valores p < 0.05 y eso se observa tambien al analizarlo de forma local. En tanto, para junio y julio los valores de p son mas altos y ello podria estar generando que se ploteen como valores perdidos.
+
+# 3.Variograma ####
+names(pre_may)
+library(tmap)
+tmap_mode('plot')
+#Variograma experimental
+#mayo isotropico
+vex_may <- variogram(pre_mayo~1,pre_may,cutoff=1.6,width=0.1) 
+plot(vex_may, plot.numbers=TRUE)
+
+
+#junio isotropico
+names(pre_jun)
+vex_jun <- variogram(pre_junio~1,pre_jun, cutoff =2 , width =0.35)
+plot(vex_jun,plot.numbers=TRUE)
+
+
+#julio isotropico
+vex_jul <- variogram(pre_julio~1,pre_jul,cutoff=4,width=0.3) 
+plot(vex_jul,plot.numbers=TRUE)
+
+
+##Ajuste modelo variograma Isotropico
+#Mayo
+vex_may <- variogram(pre_mayo~1,pre_may,cutoff=1.6,width=0.1)
+plot(vex_may,plot.numbers=TRUE)#Modelo
+mva_may_s <- vgm(12000,"Wav",1.5,1000)
+fit_may_s <- fit.variogram(vex_may,mva_may_s)
+plot(vex_may,fit_may_s,plot.numbers=TRUE)
+saveRDS(fit_may_s,'Outputs/Out_4/fit_may_s.rds') 
+
+
+#Junio
+vex_jun <- variogram(pre_junio~1,pre_jun, cutoff =2 , width =0.35)
+plot(vex_jun,plot.numbers=TRUE)
+mva_jun_s <- vgm(5000,"Cir",0.4,1000)
+fit_jun_s <- fit.variogram(vex_jun,mva_jun_s)
+plot(vex_jun,fit_jun_s,plot.numbers=TRUE)
+saveRDS(fit_jun_s,'Outputs/Out_4/fit_jun_s.rds') 
+
+
+#Julio
+vex_jul <- variogram(pre_julio~1,pre_jul, cutoff =4 , width =0.3)
+plot(vex_jul,plot.numbers=TRUE)
+mva_jul_s <- vgm(5000,"Cir",0.4,1000)
+fit_jul_s <- fit.variogram(vex_jul,mva_jul_s)
+plot(vex_jul,fit_jul_s,plot.numbers=TRUE)
+saveRDS(fit_jul_s,'Outputs/Out_4/fit_jul_s.rds') 
+
+
+#Ajuste de modelo de variograma Anisotropicos
+
+#Ajuste Mayo Anisotropicos
+vexa_may <- variogram(pre_mayo~1,pre_may,cutoff=1.6,width=0.1,alpha=c(0, 45, 90, 135))
+plot(vexa_may,plot.numbers=TRUE)
+mvara_may <- vgm(12000,"Wav",1.5,1000,anis=c(45,0.7))
+fit_mvara_may <- fit.variogram(vexa_may,mvara_may)
+plot(vexa_may,fit_mvara_may,plot.numbers=TRUE)
+fit_mvara_may$psill[2] # sill
+fit_mvara_may$range[2] # range
+fit_mvara_may$psill[1] # nugget
+##Guardar modelo anisotropico
+#saveRDS(fit_mvara_may ,'Outputs/Out_4/variogram_may_prec.rds')  #Variograma anisotropico
+
+##En diferentes direcciones, cambia la distribucion espacial de los datos por lo que el ajuste debiese ser dependiendo de la direccion 
+
+
+#Ajuste Junio
+vex_jun <- variogram(pre_junio~1,pre_jun, cutoff =2 , width =0.32)
+plot(vex_jun,plot.numbers=TRUE)
+mvara_jun <- vgm(600,"Cir",1.25,50,anis=c(0,0.45))
+fit_mvara_jun <- fit.variogram(vex_jun,mvara_jun)
+plot(vex_jun,fit_mvara_jun,plot.numbers=TRUE)
+fit_mvara_jun$psill[2] # sill
+fit_mvara_jun$range[2] # range
+fit_mvara_jun$psill[1] # nugget
+##Guardar modelo anisotropico
+saveRDS(fit_mvara_jun ,'Outputs/Out_4/variogram_may_jun.rds')
+
+#Ajuste Julio
+vex_jul <- variogram(pre_julio~1,pre_jul,cutoff=4,width=0.3) 
+plot(vex_jul,plot.numbers=TRUE)
+mvara_jul <- vgm(600,"Cir",1.25,50,anis=c(0,0.45))
+fit_mvara_jul <- fit.variogram(vex_jul,mvara_jul)
+plot(vex_jul,fit_mvara_jul,plot.numbers=TRUE)
+fit_mvara_jul$psill[2] # sill
+fit_mvara_jul$range[2] # range
+fit_mvara_jul$psill[1] # nugget
+saveRDS(fit_mvara_jul ,'Outputs/Out_4/variogram_may_jul.rds')
+
+
+##Residuos
+#Residuos  del modelo pre_may = B0+B1*NDVI_mayo
+#Mayo
+names(pre_may)
+vexr_may <- variogram(pre_mayo~ndvi_mayo,pre_may,cutoff=1.6)
+plot(vexr_may,plot.numbers=TRUE)
+
+#Junio
+vexr_jun <- variogram(pre_junio~ndvi_junio,pre_jun,cutoff =2 , width =0.32)
+plot(vexr_jun,plot.numbers=TRUE)
+
+#Julio
+vexr_jul <- variogram(pre_julio~ndvi_julio,pre_jul,cutoff=2,width=0.32)
+plot(vexr_jul,plot.numbers=TRUE)
+
+
+# Ajuste del modelo de variograma a los residuos
+# Mayo
+fit_mvexr_may <- fit.variogram(vexr_may,vgm(5000,'Wav',1.5, nugget=2000)) #si no converge, modificar variograma experimental
+plot(vexr_may,fit_mvexr_may,plot.numbers=TRUE)
+#saveRDS(fit_mvexr_may ,'Outputs/Out_4/fit_mvexr_may.rds')
+
+
+# Junio
+fit_mvexr_jun <- fit.variogram(vexr_jun,vgm(5000,'Exp',0.2, nugget=200, anis=c(45, 0.22)))
+plot(vexr_jun,fit_mvexr_jun,plot.numbers=TRUE)
+#saveRDS(fit_mvexr_jun ,'Outputs/Out_4/fit_mvexr_jun.rds')
+
+
+# Julio
+fit_mvexr_jul <- fit.variogram(vexr_jul,vgm(8000,'Per',0.5, nugget=2000, anis=c(45, 0.8)))
+plot(vexr_jul,fit_mvexr_jul,plot.numbers=TRUE)
+#saveRDS(fit_mvexr_jul ,'Outputs/Out_4/fit_mvexr_jul.rds')
+
+### Los variograma de residuos de la precipitacion de los meses con respecto al NDVI son aquellos que tienen menor error de prediccion
+
+
+
+##variograma de residuos de modelo de regresión lineal múltiple
+#Variograma experimental
+library(ggplot2)
+library(ggpubr)
+#Prueba NDVI Mayo con Prec Mayo
+gra_prueba = ggplot(pre_may, aes(pre_mayo, ndvi_mayo))
+gra_prueba + geom_point()
+gra_prueba <- gra_prueba + geom_point() + labs (x = 'NDVI Mayo', y = 'Precipitacion Mayo (mm)') + geom_smooth(method = lm, formula = y~x, colour = 'Red')
+summary(gra_prueba)
+plot(pre_mayo~ndvi_mayo,pre_may, main = 'Diagrama de dispersion entre variables Precipitación mayo y NDVI Mayo')
+
+#Prueba DEM con Prec Mayo
+gra_prueba_dem = ggplot(pre_may, aes(pre_mayo, dem))
+gra_prueba_dem + geom_point()
+gra_prueba_dem <- gra_prueba_dem + geom_point() + labs (x = 'Elevacion (m)', y = 'Precipitacion Mayo (mm)') + geom_smooth(method = lm, formula = y~x, colour = 'Red')
+summary(gra_prueba_dem)
+
+#Prueba Dist cost con Prec Mayo
+gra_prueba_cost = ggplot(pre_may, aes(pre_mayo, distancia_costa))
+gra_prueba_cost <- gra_prueba_cost + geom_point()
+gra_prueba_cost <- gra_prueba_cost + geom_point() + labs (x = 'Distancia a la costa(m)', y = 'Precipitacion Mayo (mm)') + geom_smooth(method = lm, formula = y~x, colour = 'Red')
+summary(gra_prueba_cost)
+ggarrange(gra_prueba, gra_prueba_dem, gra_prueba_cost)
+
+### Antes de hacer el variograma, se plotearon scatterplot para la variable precipitacion mayo con respecto al ndvi mayo, dem y distancia a la costa y se grafico la linea de regresion simple con el modeo y~x. Los nube de puntos en todos los casos muestra un comportamiento disperso, sin una tendencia preferencial (aunque levemente inversa en distancia a la costa)
+
+
+#Mayo
+vexrm_may <- variogram(pre_mayo~ndvi_mayo+ndvi_junio+ndvi_julio+dem+distancia_costa,pre_may,cutoff=2, width =0.18) 
+plot(vexrm_may,plot.numbers=TRUE)
+
+
+#Junio
+vexrm_jun <- variogram(pre_junio~ndvi_junio+ndvi_julio+ndvi_mayo+dem+distancia_costa,pre_jun,cutoff=2, width=0.18) 
+plot(vexrm_jun,plot.numbers=TRUE)
+
+
+#Julio
+vexrm_jul <- variogram(pre_julio~ndvi_julio+ndvi_junio+ndvi_mayo+dem+distancia_costa,pre_jul,cutoff=2, width=0.2) 
+plot(vexrm_jul,plot.numbers=TRUE)
+
+
+#Ajuste de modelo de variograma múltiple isotropico
+vexrm_may <- variogram(pre_mayo~ndvi_mayo+ndvi_junio+ndvi_julio+dem+distancia_costa,pre_may,cutoff=2, width =0.18) 
+plot(vexrm_may,plot.numbers=TRUE)
+mva_may_m <- vgm(900,"Pen",0.2,385)
+fit_may_m <- fit.variogram(vexrm_may,mva_may_m)
+plot(vexrm_may,fit_may_m,plot.numbers=TRUE)
+saveRDS(fit_may_m,'Outputs/Out_4/fit_may_m.rds') 
+
+
+#Ajuste de modelo de variograma múltiple isotropico
+#Junio
+vexrm_jun <- variogram(pre_junio~ndvi_junio+ndvi_julio+ndvi_mayo+dem+distancia_costa,pre_jun,cutoff=2, width=0.18)  
+plot(vexrm_jun,plot.numbers=TRUE)
+mva_jun_m <- vgm(4000,'Exc',0.1,200)
+fit_jun_m <- fit.variogram(vexrm_jun,mva_jun_m)
+plot(vexrm_jun,fit_jun_m,plot.numbers=TRUE)
+saveRDS(fit_jun_m,'Outputs/Out_4/fit_jun_m.rds') 
+
+
+#Julio
+vexrm_jul <- variogram(pre_julio~ndvi_julio+ndvi_junio+ndvi_mayo+dem+distancia_costa,pre_jul,cutoff=2, width=0.2) 
+plot(vexrm_jul,plot.numbers=TRUE)
+mva_jul_m <- vgm(3500,'Exc',0.1,200)
+fit_jul_m <- fit.variogram(vexrm_jul,mva_jul_m)
+plot(vexrm_jul,fit_jul_m,plot.numbers=TRUE)
+saveRDS(fit_jul_m,'Outputs/Out_4/fit_jul_m.rds') 
+
+show.vgm()
+##Los variogramas muestran caracteristicas importantes de las variables, en todos estos modelos ninguno de ello ha permitido observar el comportamiento en el origen para identificar que tan semejantes son dos datos muy cercanos, es decir, la continuidad o regularidad de la corta distancia, solamente se ha observado el alcance del variograma que es donde se estabiliza o la "zona de influencia". Un comportamiento que ocurre en tdos los casos es la fluctuancion de los datos, aquello puede indicar que el variograma experimental no es confialbe o interpretable .
+#el modelo que mejor se ajusto a los datos para mayo fue el pentaesferico, mientras que para junio y julio lo fue el exponencial. 
+
+
+#Ajuste de modelo de variograma múltiple anisotropico
+#mayo
+fit_mvexrm_may <- fit.variogram(vexrm_may,vgm(1000,'Cir',0.8, nugget=80, anis=c(45, 0.22)))
+plot(vexrm_may,fit_mvexrm_may,plot.numbers=TRUE)
+summary(fit_mvexrm_may)
+saveRDS(fit_mvexrm_may ,'Outputs/Out_4/fit_mvexrm_may.rds')
+
+#junio
+fit_mvexrm_jun <- fit.variogram(vexrm_jun,vgm(4000,'Mat',1, nugget=400,anis=c(45, 0.2)))
+plot(vexrm_jun,fit_mvexrm_jun,plot.numbers=TRUE)
+saveRDS(fit_mvexrm_jun ,'Outputs/Out_4/fit_mvexrm_jun.rds')
+
+#julio
+fit_mvexrm_jul <- fit.variogram(vexrm_may,vgm(5000,'Mat',1, nugget=800, anis=c(45, 0.45)))
+plot(vexrm_jul,fit_mvexrm_jul,plot.numbers=TRUE)
+saveRDS(fit_mvexrm_jul ,'Outputs/Out_4/fit_mvexrm_jul.rds')
+
+
+
+#Mapa interactivo
+#install.packages('basemaps')
+library(basemaps)
+
+get_maptypes()
+lagos_reg <-readRDS('Data/Data_processed/area_estudio.rds')
+lagos_sf <- st_as_sf(lagos_reg)
+bm <- basemap_raster(lagos_sf, map_service = 'osm', map_type = 'topographic')
+
+tmap_mode("view")
+##
+LM_map  <- tm_shape(bm,name = 'Topographic' )+tm_rgb()+
+  tm_shape(pre_jul, name='Local Moran Julio') + tm_symbols(size=.5, col="gray")+  
+  tm_shape(pre_jun, name='Local Moran Junio') + tm_symbols(size=.5, col="gray")+ 
+  tm_shape(pre_may, name='Local Moran Mayo') + tm_symbols(size=.5,col="quadr")+
+  tm_layout(title='Mapa Local Moran', main.title.size = 1,
+            fontfamily = 'serif',
+            legend.outside = TRUE)+
+  tm_scale_bar()+tm_graticules()
+
+LM_map
+
+#tmap_save(LM_map, "Outputs/out_4/map_interactivo_LM.html")
+
+#Mapa Local Moran mayo
+tmap_mode("plot")
+legend_title=expression("Local Moran Mayo")
+LM_may_map <-  tm_shape(bm)+
+  tm_rgb()+
+  tm_shape(pre_may) + tm_symbols(size=.5, col="quadr")+ 
+  tm_shape(lim) + tm_borders() +tm_dots() +
+  tm_layout(main.title.size = 1,
+            fontfamily = 'serif',
+            legend.outside = TRUE) +
+  tm_compass(type = "arrow", position = c("left", "top")) +tm_scale_bar()+tm_graticules()
+
+#tmap_save(LM_may_map,"Outputs/out_4/LM_map_mayo.png", dpi = 300)
+
+#Mapa Local Moran junio
+legend_title=expression("Local Moran Junio")
+LM_jun_map <-  tm_shape(bm)+
+  tm_rgb()+
+  tm_shape(pre_jun) + tm_symbols(size=.5, col="quadr")+ 
+  tm_shape(lim) + tm_borders() +tm_dots() +
+  tm_layout(main.title.size = 1,
+            fontfamily = 'serif',
+            legend.outside = TRUE) +
+  tm_compass(type = "arrow", position = c("left", "top")) +tm_scale_bar()+tm_graticules()
+
+#tmap_save(LM_jun_map,"Outputs/out_4/LM_map_junio.png", dpi = 300)
+
+
+#Mapa Local Moran julio
+
+LM_jul_map <-  tm_shape(bm)+
+  tm_rgb()+
+  tm_shape(pre_jul, name='Local Moran Julio') + tm_symbols(size=.5, col="quadr")+ 
+  tm_shape(lim) + tm_borders() +tm_dots() +
+  tm_layout(main.title.size = 1,
+            fontfamily = 'serif',
+            legend.outside = TRUE) +
+  tm_compass(type = "arrow", position = c("left", "top")) +tm_scale_bar()+tm_graticules()
+
+#tmap_save(LM_jul_map,"Outputs/out_4/LM_map_julio.png", dpi = 300)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

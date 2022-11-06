@@ -1,0 +1,162 @@
+#Librerias 
+library(sf)
+library(sp)
+library(spdep)
+library(tidyr)
+library (dplyr)
+library (terra)
+library (gstat)
+library (stars)
+library (tmap)
+
+
+#Area de estudio 
+lim <- readRDS('Data/Data_processed/area_estudio.rds') |>    
+st_transform(32719)
+
+#Mayo
+
+pre_may <- pre_may |>
+  st_as_sf() |>
+  st_transform(32719)
+
+pre_may <- pre_may |>
+  st_as_sf() |>
+  st_transform(32719) |>
+  st_coordinates() |>
+  bind_cols(pre_may) |>
+  distinct(X,Y,.keep_all = TRUE) |>
+  tidyr::drop_na()
+
+################### Cargar Variograma Ajustado ######################
+
+
+pre_may <- pre_may |>
+  st_as_sf() |>
+  st_transform(32719) |>
+  st_coordinates() |>
+  bind_cols(pre_may) |>
+  distinct(X,Y,.keep_all = TRUE) |>
+  tidyr::drop_na()
+
+pre_may <- st_as_sf(pre_may)
+
+preds <- rast('output/raster/predictores_prec_region_ohiggins.tif')   #### RUTEAR ####
+names (preds) <- names(pre_may)[3:7]
+
+grilla <- preds[[1]]
+values(grilla) <- 0
+grilla <- project(grilla,'epsg:32719')
+
+grilla <- st_as_stars(grilla) |>
+  st_crop(lim)
+plot(grilla)
+
+################### Kriging Ordinario ######################
+
+# Cargar Variograma Ajustado
+
+ok_may <- krige(pre_mayo~1,pre_may,grilla, model = fit_mvar_may)
+ok_may <- rast(ok_may)
+plot(ok_may)
+
+ok_may_cv <- krige.cv(pre_mayo~1,as(pre_may,'Spatial'),grilla, model=fit_mvar_may,nfold = 10)
+mean(ok_may_cv$residual)
+r2_may <- 1- sum(ok_may_cv$residual^2)/sum((ok_may_cv$observed-mean(ok_may_cv$observed))^2)
+r2_may
+
+################### Regresión-Kriging ######################
+grilla <- preds[[5]]
+#values(grilla) <- 0
+grilla <- project(grilla,'epsg:32719')
+
+grilla <- st_as_stars(grilla) |>
+  st_crop(lim)
+plot(grilla)
+
+rk_may <- krige(pre_mayo~ndvi_mayo,pre_may,grilla,fit_mvexr_may)
+rk_may <- rast(rk_may)
+plot(rk_may)
+
+rk_may_cv <- krige.cv(pre_mayo~1,as(pre_may,'Spatial'),grilla, model=fit_mvar_may,nfold = 10)
+mean(rk_may_cv$residual)
+r2_may_rk <- 1- sum(rk_may_cv$residual^2)/sum((rk_may_cv$observed-mean(rk_may_cv$observed))^2)
+r2_may_rk
+
+## Junio
+################### Cargar Data ######################
+
+pre_jun <- pre_jun |>
+  st_as_sf() |>
+  st_transform(32719)
+
+pre_jun <- pre_jun |>
+  st_as_sf() |>
+  st_transform(32719) |>
+  st_coordinates() |>
+  bind_cols(pre_jun) |>
+  distinct(X,Y,.keep_all = TRUE) |>
+  tidyr::drop_na()
+
+################### Cargar Variograma Ajustado ######################
+
+
+pre_jun <- pre_jun |>
+  st_as_sf() |>
+  st_transform(32719) |>
+  st_coordinates() |>
+  bind_cols(pre_jun) |>
+  distinct(X,Y,.keep_all = TRUE) |>
+  tidyr::drop_na()
+
+pre_jun <- st_as_sf(pre_jun)
+
+names (preds) <- names(pre_jun)[3:7]
+
+grilla <- preds[[1]]
+values(grilla) <- 0
+grilla <- project(grilla,'epsg:32719')
+
+grilla <- st_as_stars(grilla) |>
+  st_crop(lim)
+plot(grilla)
+
+################### Kriging Ordinario ######################
+
+# Cargar Variograma Ajustado
+ok_jun <- krige(pre_junio~1,pre_jun,grilla, model = fit_mvar_jun)
+ok_jun <- rast(ok_jun)
+plot(ok_jun)
+
+ok_jun_cv <- krige.cv(pre_junio~1,as(pre_jun,'Spatial'),grilla, model=fit_mvar_jun,nfold = 10)
+mean(ok_jun_cv$residual)
+r2_jun <- 1- sum(ok_jun_cv$residual^2)/sum((ok_jun_cv$observed-mean(ok_jun_cv$observed))^2)
+r2_jun
+
+################### Regresión-Kriging ######################
+preds <- rast('output/raster/predictores_prec_region_ohiggins.tif')
+names (preds) <- names(pre_jun)[4:8]
+plot(preds)
+grilla <- preds[[5]]
+#values(grilla) <- 0
+grilla <- project(grilla,'epsg:32719')
+
+grilla <- st_as_stars(grilla) |>
+  st_crop(lim)
+plot(grilla)
+
+
+rk_jun <- krige(pre_junio~ndvi_junio,pre_jun,grilla,fit_mvexr_jun)
+plot(preds)
+rk_jun <- rast(rk_jun)
+plot(rk_jun)
+
+rk_jun_cv <- krige.cv(pre_junio~1,as(pre_jun,'Spatial'),grilla, model=fit_mvar_jun,nfold = 10)
+mean(rk_jun_cv$residual)
+
+r2_jun_rk <- 1- sum(rk_jun_cv$residual^2)/sum((rk_jun_cv$observed-mean(rk_jun_cv$observed))^2)
+r2_jun_rk
+rmse_rk_jun <- sqrt(mean(ok_may_cv$residua^2))
+rmse_rk_jun
+rmse_ok_jun <- sqrt(mean(rk_may_cv$residua^2))
+rmse_ok_jun
