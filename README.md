@@ -14,4 +14,6 @@
 Descargar archivos
 - estaciones_agromet.csv
 - data_climatica_RAN_2022.csv
+
+
 en el directorio /METE133/Data/Data_raw
