@@ -1,7 +1,7 @@
-#<pre>
- *    METE133                                                              *
- *    Camila Jimenez                                                       *
- *    Daniela Pastene                                                      *
+<pre>
+ *    METE133                                                             
+ *    Camila Jimenez                                                       
+ *    Daniela Pastene                                                      
 
 </pre>
 
